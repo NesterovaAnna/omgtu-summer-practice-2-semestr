@@ -60,7 +60,42 @@ using System.Collections.Concurrent;
 var queue1 = new BlockingCollection<Message>(2); //очередь первого потока
 var queue2 = new BlockingCollection<Message>(2); //очередь второго потока
 
-// Здесь писать решение
+Thread thread1 = new Thread(() =>
+{
+    for (int i = 0; i < 100; i++)
+    {
+        Message message = queue1.Take();
+        message.Handle();
+        queue2.Add(new Message());
+    }
+});
+
+Thread thread2 = new Thread(() =>
+{
+    for (int i = 0; i < 100; i++)
+    {
+        if (i == 99)
+        {
+            Message message = queue2.Take();
+            message.Handle();
+        }
+        else
+        {
+            Message message = queue2.Take();
+            message.Handle();
+            queue1.Add(new Message());
+        }
+        
+    }
+});
+
+thread1.Start();
+thread2.Start();
+
+queue1.Add(new Message());
+
+thread1.Join();
+thread2.Join();
 
 #!csharp
 
