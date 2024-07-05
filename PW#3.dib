@@ -35,6 +35,7 @@
 //
 // Вычисление определенного интеграла
 //
+using System.Threading;
 class DefiniteIntegral
 {
     //
@@ -43,10 +44,43 @@ class DefiniteIntegral
     // step - размер одного шага разбиения
     // threadsNumber - число потоков, которые используются для вычислений
     //
-    public static double Solve(double a, double b, Func<double, double> function, double step, int threadsnumber)
+    public static double Solve(double a, double b, Func<double, double> function, double step, int threadsNumber)
     {
-        // отсюда надо начинать реализацию задачи
-        return 0.0;
+        double result = 0.0; // Переменная для хранения общего результата
+        Barrier barrier = new Barrier(threadsNumber + 1); // Барьер для синхронизации потоков
+        double segmentLength = (b - a) / threadsNumber; // Длина отрезка для каждого потока
+
+        // Запускаем потоки для каждого отрезка
+        for (int i = 0; i < threadsNumber; i++)
+        {
+            int threadIndex = i;
+            Thread thread = new Thread(() =>
+            {
+                double start = a + threadIndex * segmentLength; // Начало отрезка для текущего потока
+                double end = start + segmentLength; // Конец отрезка для текущего потока
+                double sum = 0.0; // Частичный результат вычисления интеграла на отрезке
+
+                // Вычисление интеграла методом трапеций на отрезке
+                for (double x = start + step; x < end; x += step)
+                {
+                    sum += function(x);
+                }
+
+                // Добавление частичного результата к общему результату с помощью Interlocked.Exchange
+                double partialResult = step * ((function(start) + function(end)) / 2 + sum); 
+                Interlocked.Exchange(ref result, result + partialResult); // Атомарное добавление с помощью Exchange
+
+                // Сообщаем барьеру, что поток завершил свою работу
+                barrier.SignalAndWait();
+            });
+            thread.Start();
+        }
+
+        // Основной поток ждет, пока все потоки не завершат свою работу
+        barrier.SignalAndWait();
+        barrier.Dispose();
+
+        return result;
     }
 }
 
@@ -56,11 +90,18 @@ class DefiniteIntegral
 
 using Xunit;
 
-var X = (double x) => x;
-var SIN = (double x) => Math.Sin(x);
+static double X(double x) => x;
+static double  SIN(double x) => Math.Sin(x);
 
-Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-4, 2), 1e-4);
+class Program
+{
+    static void Main(string[] args)
+    {
+        // Тестирование
+        Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-4, 2), 1e-4);
 
-Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-5, 8), 1e-4);
+        Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-5, 8), 1e-4);
 
-Assert.Equal(10, DefiniteIntegral.Solve(0, 5, X, 1e-6, 8), 1e-5);
+        Assert.Equal(50, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
+    }
+}
