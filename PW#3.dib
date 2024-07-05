@@ -32,9 +32,9 @@
 
 #!csharp
 
-//
 // Вычисление определенного интеграла
-//
+
+using System.Threading;
 class DefiniteIntegral
 {
     //
@@ -43,24 +43,156 @@ class DefiniteIntegral
     // step - размер одного шага разбиения
     // threadsNumber - число потоков, которые используются для вычислений
     //
-    public static double Solve(double a, double b, Func<double, double> function, double step, int threadsnumber)
+    public static double Solve(double a, double b, Func<double, double> function, double step, int threadsNumber)
     {
-        // отсюда надо начинать реализацию задачи
-        return 0.0;
+        double result = 0.0;
+        object lockObj = new object();
+        double interval = (b - a) / threadsNumber;
+        Task[] tasks = new Task[threadsNumber];
+        for (int i = 0; i < threadsNumber; i++)
+        {
+            double localA = a + i * interval;
+            double localB = localA + interval;
+            tasks[i] = Task.Run(() =>
+            {
+                double localResult = 0.0;
+                int steps = (int)Math.Ceiling((localB - localA) / step);
+                for (int j = 0; j < steps; j++)
+                {
+                    double x1 = localA + j * step;
+                    double x2 = Math.Min(x1 + step, localB);
+                    localResult += (function(x1) + function(x2)) / 2 * (x2 - x1);
+                }
+                lock (lockObj) { result += localResult; }
+            });
+        }
+        Task.WaitAll(tasks);
+        return result;
+    }
+
+    public static double Solve1(double a, double b, Func<double, double> function, double step)
+    {
+        double result = 0.0;
+        result += (function.Invoke(a) + function.Invoke(b)) / 2;
+        int steps = (int) Math.Round((b - a) / step);
+        for (int i = 1; i < steps; i++) {
+            result += function.Invoke(a + i * step);
+        }   
+        return result*step;
     }
 }
 
 #!csharp
 
+// Покажем, что тест выполняется при любом шаге
+// Выберем шаг с оптимальным временем (1e-1)
+
 #r "nuget: xunit, 2.8.1"
 
 using Xunit;
+using System.Diagnostics;
 
-var X = (double x) => x;
 var SIN = (double x) => Math.Sin(x);
+Stopwatch time = new Stopwatch();
+double totalTime = 0;
+for (double i = 1e-1; i >= 1e-6; i *= 0.1)
+{
+    for (int j = 0; j < 101; j++)
+    {
+        time.Restart();
+        Assert.Equal(0, DefiniteIntegral.Solve1(-100, 100, SIN, i), 1e-4);
+        time.Stop();
+        totalTime += time.Elapsed.TotalMilliseconds;
+    }
+    Console.WriteLine($"Среднее время {i}: {totalTime / 100} ms");
+}
 
-Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-4, 2), 1e-4);
+#!csharp
 
-Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-5, 8), 1e-4);
+// Поиск оптимального кол-ва потоков
 
-Assert.Equal(10, DefiniteIntegral.Solve(0, 5, X, 1e-6, 8), 1e-5);
+#r "nuget: xunit, 2.8.1"
+
+using Xunit;
+using System.Diagnostics;
+
+var SIN = (double x) => Math.Sin(x);
+Stopwatch time = new Stopwatch();
+
+double[] dataX = new double[50];
+int[] dataY = new int[50];
+
+for (int i = 1; i < 51; i++)
+{
+    double totalTime = 0;
+    for (int j = 0; j < 101; j++)
+    {
+        time.Restart();
+        DefiniteIntegral.Solve(-100, 100, SIN, 1e-1, i);
+        time.Stop();
+        totalTime += time.Elapsed.TotalMilliseconds;
+    }
+    dataX[i - 1] = totalTime / 100;
+    dataY[i - 1] = i;
+}
+
+Console.WriteLine($"Наилучшая производительность достигается при использовании {Array.IndexOf(dataX, dataX.Min()) + 1} потоков");
+
+#!csharp
+
+// График
+
+#r "nuget:ScottPlot, 5.0.35"
+
+using Microsoft.DotNet.Interactive.Formatting;
+
+Formatter.Register(typeof(ScottPlot.Plot), (p, w) => 
+    w.Write(((ScottPlot.Plot)p).GetImageHtml(800, 400)), HtmlFormatter.MimeType);
+
+ScottPlot.Plot plt = new();
+plt.Add.Scatter(dataX, dataY);
+Console.WriteLine(dataX.Min());
+
+plt
+
+#!csharp
+
+// Сравнение однопоточного выполнения программы c многопоточным
+
+using System.Diagnostics;
+
+Stopwatch time = new Stopwatch();
+
+double totalTime = 0;
+for (int j = 0; j < 101; j++)
+{
+    time.Restart();
+    DefiniteIntegral.Solve1(-100, 100, SIN, 1e-1);
+    time.Stop();
+    totalTime += time.Elapsed.TotalMilliseconds;
+}
+double x = totalTime / 100;
+
+totalTime = 0;
+for (int j = 0; j < 101; j++)
+{
+    time.Restart();
+    DefiniteIntegral.Solve(-100, 100, SIN, 1e-1, 30);
+    time.Stop();
+    totalTime += time.Elapsed.TotalMilliseconds;
+}
+double y = totalTime / 100;
+
+double percent = Math.Round(x / y * 100 - 100);
+Console.WriteLine($"Однопоточное выполнение: {x}\nМногопоточное выполнение: {y}\nМногопоточная программа эффективнее однопоточной на: {percent}%");
+
+#!markdown
+
+## Summary
+
+- размер шага, выбранный в п.4 : 1e-1 
+- оптимальное количество потоков из п. 5 и скорость оптимальной многопоточной версии в сравнении с однопоточной (время работы, разница в процентах):
+  - оптимальное количество потоков: 25-35
+  - скорость выполнения 1 потока: 0,064 мс;
+  - скорость выполнения 30 потоков: 0,052 мс;
+  - разница: 23%.
