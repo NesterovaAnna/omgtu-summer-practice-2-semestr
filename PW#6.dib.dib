@@ -41,6 +41,156 @@
 
 // здесь писать код
 
+#!csharp
+
+using System;
+using System.Threading;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Diagnostics;
+
+// ConcurrentQueue
+(int, int, int) TestConcurrentQueue()
+{
+    ConcurrentQueue<int> concurrentQueue = new ConcurrentQueue<int>();
+    Stopwatch  time = new Stopwatch();
+    Stopwatch time1 = new Stopwatch();
+    Stopwatch time2 = new Stopwatch();
+    ManualResetEvent resetEvent = new ManualResetEvent(false);
+
+    Thread thread1 = new Thread(() =>
+    {
+        resetEvent.WaitOne();
+        time1.Start();
+        for (int i = 0; i < 1000000; i++)
+        {
+            concurrentQueue.Enqueue(i);
+        }
+        time1.Stop();
+    });
+
+    Thread thread2 = new Thread(() =>
+    {
+        resetEvent.WaitOne();
+        int result;
+        time2.Start();
+        for (int i = 0; i < 1000000; i++)
+        {
+            while (!concurrentQueue.TryDequeue(out result)) { }
+        }
+        time2.Stop();
+    });
+    thread1.Start();
+    thread2.Start();
+    resetEvent.Set();
+    time.Start();
+    thread1.Join();
+    thread2.Join();
+    time.Stop();
+    return ((int)time.ElapsedMilliseconds, (int)time1.ElapsedMilliseconds, (int)time2.ElapsedMilliseconds);
+}
+
+// BlockingCollection
+(int, int, int) TestBlockingCollection()
+{
+    BlockingCollection<int> blockingCollection = new BlockingCollection<int>();
+    Stopwatch time = new Stopwatch();
+    Stopwatch time1 = new Stopwatch();
+    Stopwatch time2 = new Stopwatch();
+    ManualResetEvent resetEvent = new ManualResetEvent(false);
+
+    Thread thread1 = new Thread(() =>
+    {
+        resetEvent.WaitOne();
+        time1.Start();
+        for (int i = 0; i < 1000000; i++)
+        {
+            blockingCollection.Add(i);
+        }
+        time1.Stop();
+        blockingCollection.CompleteAdding();
+    });
+
+    Thread thread2 = new Thread(() =>
+    {
+        resetEvent.WaitOne();
+        time2.Start();
+        while (!blockingCollection.IsCompleted)
+        {
+            if (blockingCollection.TryTake(out _)) { }
+        }
+        time2.Stop();
+    });
+    thread1.Start();
+    thread2.Start();
+    resetEvent.Set();
+    time.Start();
+    thread1.Join();
+    thread2.Join();
+    time.Stop();
+    return ((int)time.ElapsedMilliseconds, (int)time1.ElapsedMilliseconds, (int)time2.ElapsedMilliseconds);
+}
+
+// Queue
+(int, int, int) TestQueue()
+{
+    Queue<int> queue = new Queue<int>();
+    Stopwatch time = new Stopwatch();
+    Stopwatch time1 = new Stopwatch();
+    Stopwatch time2 = new Stopwatch();
+    time.Start();
+    time1.Start();
+    for (int i = 0; i < 1000000; i++) 
+    { 
+        queue.Enqueue(i); 
+    }
+    time1.Stop();
+    time2.Start();
+    for (int i = 0; i < 1000000; i++) 
+    { 
+        queue.Dequeue(); 
+    }
+    time2.Stop();
+    time.Stop();
+    return ((int)time.ElapsedMilliseconds, (int)time1.ElapsedMilliseconds, (int)time2.ElapsedMilliseconds);
+}
+
+(int[], int[]) Test(Func<(int, int, int)> testMethod)
+{
+    int[] res = new int[10];
+    int[] ite = new int[10];
+    for (int i = 1; i < 11; i++)
+    {
+        res[i - 1] = testMethod().Item1;
+        ite[i - 1] = i;
+    }
+    return (ite, res);
+}
+
+#!csharp
+
+#r "nuget:ScottPlot, 5.0.35"
+using Microsoft.DotNet.Interactive.Formatting;
+
+Formatter.Register(typeof(ScottPlot.Plot), (p, w) => 
+    w.Write(((ScottPlot.Plot)p).GetImageHtml(800, 400)), HtmlFormatter.MimeType);
+(int[] dataX1,int[] dataY1) = Test(TestConcurrentQueue);
+(int[] dataX2,int[] dataY2) = Test(TestBlockingCollection);
+(int[] dataX3,int[] dataY3) = Test(TestQueue);
+
+ScottPlot.Plot plt = new();
+plt.Add.Scatter(dataX1, dataY1);
+plt.Add.Scatter(dataX2, dataY2);
+plt.Add.Scatter(dataX3, dataY3);
+
+Console.WriteLine($"ConcurrentQueue: {dataY1.Average()}\nBlockingCollection: {dataY2.Average()}\nQueue: {dataY3.Average()}");
+
+plt
+
 #!markdown
 
 ## Вывод
+
+Наиболее эффективная потоко-безопасная коллекция - ConcurrentQueue 
+
+В сравнение с обычной очередью Queue, потоко-безопасная коллекция ConcurrentQueue эффуктивнее на 16%
